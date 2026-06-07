@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>加密雷达 - 实时行情分析</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+</head>
+<body>
+    <!-- Header -->
+    <header class="hdr">
+        <div class="hdr-left">
+            <span class="logo">📡 加密雷达</span>
+        </div>
+        <div class="hdr-stats">
+            <span class="hs">总市值 <b id="vMcap">--</b></span>
+            <span class="hs">24h成交 <b id="vVol">--</b></span>
+            <span class="hs">BTC占比 <b id="vBtc">--</b></span>
+            <span class="hs">市场情绪 <b id="vFng">--</b></span>
+        </div>
+        <div class="hdr-right">
+            <span class="update-time" id="vTime">--</span>
+            <span class="countdown" id="vCountdown"></span>
+            <button class="btn" id="btnRefresh" onclick="doRefresh()">刷新</button>
+        </div>
+    </header>
+
+    <!-- 时间段切换 -->
+    <div class="tf-bar">
+        <button class="tf-btn active" id="tfShort" onclick="switchTF('short')">
+            ⚡ 短线 <span class="tf-sub">1小时级别</span>
+        </button>
+        <button class="tf-btn" id="tfLong" onclick="switchTF('long')">
+            📊 长线 <span class="tf-sub">日线级别</span>
+        </button>
+        <div class="tf-spacer"></div>
+        <span class="tf-label" id="tfInfo">当前: 1H K线 · 7天数据</span>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <div class="filter-pills">
+            <button class="pill active" data-f="all" onclick="filterBy('all')">全部</button>
+            <button class="pill" data-f="bull" onclick="filterBy('bull')">看多</button>
+            <button class="pill" data-f="bear" onclick="filterBy('bear')">看空</button>
+            <button class="pill" data-f="oversold" onclick="filterBy('oversold')">超卖</button>
+            <button class="pill" data-f="overbought" onclick="filterBy('overbought')">超买</button>
+            <button class="pill" data-f="golden" onclick="filterBy('golden')">金叉</button>
+            <button class="pill" data-f="dead" onclick="filterBy('dead')">死叉</button>
+        </div>
+        <input class="search" id="searchInput" placeholder="搜索币种..." oninput="doSearch(this.value)">
+        <select class="sel" id="selInterval" onchange="setAutoInterval(this.value)">
+            <option value="30">每30秒</option>
+            <option value="60" selected>每1分钟</option>
+            <option value="180">每3分钟</option>
+            <option value="300">每5分钟</option>
+        </select>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar"><div class="progress-fill" id="pFill"></div></div>
+        <span class="progress-text" id="pText">准备加载...</span>
+    </div>
+
+    <!-- Grid -->
+    <main class="grid" id="grid"></main>
+
+    <!-- Detail Modal with K-line -->
+    <div class="modal-bg" id="modalBg" onclick="closeModal()">
+        <div class="modal modal-wide" onclick="event.stopPropagation()">
+            <button class="modal-x" onclick="closeModal()">&times;</button>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <footer class="ft">数据源: OKX | 指标: EMA RSI MACD 布林带 | 价格每秒刷新</footer>
+    <script src="app.js"></script>
+</body>
+</html>
