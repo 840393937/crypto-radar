@@ -48,7 +48,6 @@ function sortData(){
 }
 
 const OKX = 'https://www.okx.com/api/v5';
-const PX = 'https://api.allorigins.win/raw?url=';
 const CACHE = {};
 const CACHE_TTL = 30*60*1000;
 
@@ -477,13 +476,22 @@ function strictFilter(signals,candlePats,chartPats,adxData,rsiNow,hNow,hPrev,e7n
 }
 
 // ---- API ----
+const PROXIES=[
+    u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
+    u=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u),
+    u=>u // direct fallback
+];
 async function okx(path){
-    const url=PX+encodeURIComponent(OKX+path);
-    const r=await fetch(url);
-    if(!r.ok)throw new Error('API '+r.status);
-    const d=await r.json();
-    if(d.code!=='0')throw new Error('OKX: '+d.msg);
-    return d.data;
+    const target=OKX+path;
+    for(const px of PROXIES){
+        try{
+            const r=await fetch(px(target),{signal:AbortSignal.timeout(15000)});
+            if(!r.ok)continue;
+            const d=await r.json();
+            if(d.code==='0')return d.data;
+        }catch(e){continue;}
+    }
+    throw new Error('所有API代理都失败');
 }
 
 function getCache(sym,bar){const k=sym+'_'+bar;const e=CACHE[k];if(e&&Date.now()-e.t<CACHE_TTL)return e.d;return null;}
