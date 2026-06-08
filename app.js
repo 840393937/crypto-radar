@@ -48,6 +48,7 @@ function sortData(){
 }
 
 const OKX = 'https://www.okx.com/api/v5';
+const PX = 'https://api.allorigins.win/raw?url=';
 const CACHE = {};
 const CACHE_TTL = 30*60*1000;
 
@@ -476,7 +477,14 @@ function strictFilter(signals,candlePats,chartPats,adxData,rsiNow,hNow,hPrev,e7n
 }
 
 // ---- API ----
-async function okx(path){const r=await fetch(OKX+path);if(!r.ok)throw new Error('API '+r.status);const d=await r.json();if(d.code!=='0')throw new Error('OKX: '+d.msg);return d.data;}
+async function okx(path){
+    const url=PX+encodeURIComponent(OKX+path);
+    const r=await fetch(url);
+    if(!r.ok)throw new Error('API '+r.status);
+    const d=await r.json();
+    if(d.code!=='0')throw new Error('OKX: '+d.msg);
+    return d.data;
+}
 
 function getCache(sym,bar){const k=sym+'_'+bar;const e=CACHE[k];if(e&&Date.now()-e.t<CACHE_TTL)return e.d;return null;}
 function setCache(sym,bar,data){const k=sym+'_'+bar;CACHE[k]={d:data,t:Date.now()};}
@@ -488,6 +496,7 @@ async function refreshPrices(){
     try{
         const tickers=await okx('/market/tickers?instType=SPOT');
         const map={};tickers.forEach(t=>{map[t.instId.replace('-USDT','')]=t;});
+        const updates=[];
         for(const c of allData){
             const t=map[c.sym];if(!t)continue;
             const price=parseFloat(t.last);
@@ -496,13 +505,20 @@ async function refreshPrices(){
             if(price<=0)continue;
             const old=c.cur;
             c.cur=price;c.chg24=chg;c.vol24h=vol;
-            if(domReady){
-                const pe=document.getElementById(`p_${c.sym}`),ce=document.getElementById(`c_${c.sym}`),ve=document.getElementById(`v_${c.sym}`);
-                if(pe)pe.textContent=FU(price);
-                if(ce){ce.textContent=FP(chg);ce.className=`card-chg ${chg>=0?'up':'dn'}`;}
-                if(ve)ve.textContent=FK(vol);
-                if(pe&&old&&price!==old){pe.style.color=price>old?'var(--g)':'var(--r)';setTimeout(()=>{pe.style.color='';},500);}
-            }
+            if(domReady&&old&&price!==old)updates.push({sym:c.sym,price,chg,vol,up:price>old});
+        }
+        if(domReady&&updates.length){
+            requestAnimationFrame(()=>{
+                for(const u of updates){
+                    const pe=document.getElementById(`p_${u.sym}`),ce=document.getElementById(`c_${u.sym}`),ve=document.getElementById(`v_${u.sym}`);
+                    if(pe){pe.textContent=FU(u.price);pe.style.color=u.up?'var(--g)':'var(--r)';}
+                    if(ce){ce.textContent=FP(u.chg);ce.className=`card-chg ${u.chg>=0?'up':'dn'}`;}
+                    if(ve)ve.textContent=FK(u.vol);
+                }
+                setTimeout(()=>{
+                    for(const u of updates){const pe=document.getElementById(`p_${u.sym}`);if(pe)pe.style.color='';}
+                },300);
+            });
         }
         document.getElementById('vTime').textContent=new Date().toLocaleTimeString('zh-CN');
     }catch{}
@@ -530,11 +546,10 @@ async function fetchCandles(){
                 return vb-va;
             });
 
-        const FIRST_BATCH = 80;  // 先加载前80个
+        const FIRST_BATCH = 60;
         const first = valid.slice(0, FIRST_BATCH);
         const rest = valid.slice(FIRST_BATCH);
 
-        // ---- 第一批：阻塞加载 ----
         showProgress(`获取${tf.indLabel}K线(前${FIRST_BATCH})...`,20);
         const results1 = await pfetch(first, async(sym,i)=>{
             const cached=getCache(sym,tf.bar);
@@ -572,11 +587,14 @@ async function fetchCandles(){
             }, 8).then(results2=>{
                 buildData(results2, tmapGlobal);
                 sortData();
-                render(); // 后台加载完再渲染一次
+                render();
             });
         }
 
-    }catch(e){showProgress('失败: '+e.message,0);}
+    }catch(e){
+        console.error('Fetch error:', e);
+        showProgress('失败: '+e.message,0);
+    }
     finally{btn.disabled=false;btn.textContent='刷新';}
 }
 
@@ -810,7 +828,12 @@ function analyze(sym,prices,candles,livePrice,vol24h,chg24,h24,l24){
     return{sym,cur,chg24,c7,e7n,e25n,e99n,rsiNow,macdNow,sigNow,hNow,hPrev,bbU,bbM,bbL,vol24h,h24,l24,h7,l7,h30,l30,sigs,score,dir,cls,candles,entries,adxData,candlePats,chartPats,verdict};
 }
 
-// ---- 渲染 ----
+// ---- 渲染(虚拟滚动优化) ----
+let renderRAF = null;
+function render(){
+    if(renderRAF)cancelAnimationFrame(renderRAF);
+    renderRAF=requestAnimationFrame(fullRender);
+}
 function fullRender(){
     const grid=document.getElementById('grid');
     let list=allData;
@@ -824,7 +847,9 @@ function fullRender(){
     if(!list.length){grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--txt2)">暂无数据</div>';domReady=false;return;}
 
     const tfLabel=TF_CONFIG[curTF].indLabel;
-    grid.innerHTML=list.map((c,i)=>{
+    const frag=document.createDocumentFragment();
+    const div=document.createElement('div');
+    div.innerHTML=list.map((c,i)=>{
         const cc=c.chg24>=0?'up':'dn';
         let rsiDir='→',rsiColor='var(--txt)';
         if(c.rsiNow!==null){if(c.rsiNow<30){rsiDir='↑超卖';rsiColor='var(--g)';}else if(c.rsiNow>70){rsiDir='↓超买';rsiColor='var(--r)';}else if(c.rsiNow>50){rsiDir='↓偏高';rsiColor='var(--y)';}else{rsiDir='↑偏低';rsiColor='var(--g)';}}
@@ -833,30 +858,23 @@ function fullRender(){
         else if(c.hNow<0&&c.hPrev>=0){macdDir='死叉↓';macdColor='var(--r)';}
         else if(c.hNow>0){macdDir=c.hNow>c.hPrev?'多头增强↑':'多头减弱→';macdColor=c.hNow>c.hPrev?'var(--g)':'var(--y)';}
         else{macdDir=c.hNow<c.hPrev?'空头增强↓':'空头减弱→';macdColor=c.hNow<c.hPrev?'var(--r)':'var(--y)';}
-        let emaDir=c.e7n>c.e25n?'多头↑':'空头↓',emaColor=c.e7n>c.e25n?'var(--g)':'var(--r)';
         let bbDir,bbColor;
         if(c.bbL&&c.cur<c.bbL){bbDir='超卖↑';bbColor='var(--g)';}
         else if(c.bbU&&c.cur>c.bbU){bbDir='超买↓';bbColor='var(--r)';}
         else if(c.bbM&&c.cur>c.bbM){bbDir='上半区→';bbColor='var(--y)';}
         else{bbDir='下半区↑';bbColor='var(--g)';}
         const sc=c.score>=65?'var(--g)':c.score>=45?'var(--y)':'var(--r)';
-
-        // ADX
         const adxV=c.adxData?c.adxData.adx:0;
         const adxColor=adxV>40?'var(--g)':adxV>20?'var(--y)':'var(--txt3)';
         const adxTrend=c.adxData&&c.adxData.plusDI>c.adxData.minusDI?'↑':'↓';
         const ms=c.verdict?c.verdict.marketState:'震荡';
-
-        // 形态标签
-        const patTags=[];
-        if(c.candlePats)c.candlePats.slice(0,2).forEach(p=>patTags.push({t:'K:'+p.name,c:p.dir==='bull'?'buy':'sell'}));
-        if(c.chartPats)c.chartPats.slice(0,1).forEach(p=>patTags.push({t:'形态:'+p.name,c:p.dir==='bull'?'buy':'sell'}));
-
-        // 严格判定置信度颜色
         const vConf=c.verdict?c.verdict.confidence:'--';
         const confColor=vConf==='高'?'var(--g)':vConf==='中'?'var(--y)':'var(--txt3)';
+        const topPat=c.candlePats&&c.candlePats.length?c.candlePats[0]:null;
+        const patName=topPat?topPat.name.slice(0,4):'无';
+        const patColor=topPat?(topPat.dir==='bull'?'var(--g)':'var(--r)'):'var(--txt3)';
 
-        return`<div class="card ${c.cls}" onclick="showDetail('${c.sym}')" style="animation-delay:${i*0.02}s">
+        return`<div class="card ${c.cls}" onclick="showDetail('${c.sym}')">
             <div class="card-top">
                 <div class="card-left"><div class="card-name">${c.sym}</div><span class="badge ${c.cls}">${c.dir}</span></div>
                 <div class="card-price">
@@ -867,17 +885,19 @@ function fullRender(){
             <div class="ind-row">
                 <div class="ind"><div class="ind-l">${tfLabel}RSI</div><div class="ind-v" style="color:${rsiColor}">${c.rsiNow!==null?F(c.rsiNow,1):'--'}</div><div class="ind-s" style="color:${rsiColor}">${rsiDir}</div></div>
                 <div class="ind"><div class="ind-l">${tfLabel}MACD</div><div class="ind-v" style="color:${macdColor}">${macdDir}</div><div class="ind-s">${c.hNow>0?'+':''}${F(c.hNow,3)}</div></div>
-                <div class="ind"><div class="ind-l">市场状态</div><div class="ind-v" style="color:${adxColor}">${ms}</div><div class="ind-s">ADX:${F(adxV,0)}${adxTrend}</div></div>
-                <div class="ind"><div class="ind-l">形态</div><div class="ind-v" style="color:${patTags.length?(patTags[0].c==='buy'?'var(--g)':'var(--r)'):'var(--txt3)'}">${patTags.length?patTags[0].t.replace('K:','').replace('形态:','').slice(0,4):'无'}</div><div class="ind-s">置信 <b style="color:${confColor}">${vConf}</b></div></div>
+                <div class="ind"><div class="ind-l">趋势</div><div class="ind-v" style="color:${adxColor}">${ms}</div><div class="ind-s">ADX:${F(adxV,0)}${adxTrend}</div></div>
+                <div class="ind"><div class="ind-l">形态</div><div class="ind-v" style="color:${patColor}">${patName}</div><div class="ind-s">置信<b style="color:${confColor}">${vConf}</b></div></div>
             </div>
-            <div class="sigs">${c.verdict.reasons.slice(0,4).map(r=>`<span class="sig ${c.verdict.dir==='bull'?'buy':c.verdict.dir==='bear'?'sell':'info'}">${r}</span>`).join('')}</div>
+            <div class="sigs">${c.verdict.reasons.slice(0,3).map(r=>`<span class="sig ${c.verdict.dir==='bull'?'buy':c.verdict.dir==='bear'?'sell':'info'}">${r}</span>`).join('')}</div>
             <div class="score-row"><span class="score-lbl">评分</span><div class="score-track"><div class="score-fill" style="width:${c.score}%;background:${sc}"></div></div><span class="score-val" style="color:${sc}">${c.score.toFixed(0)}</span></div>
             <div class="card-bot"><span>24h:${FU(c.l24)}~${FU(c.h24)}</span><span>7d:${FP(c.c7)}</span><span id="v_${c.sym}">${FK(c.vol24h)}</span></div>
         </div>`;
     }).join('');
+    while(grid.firstChild)grid.removeChild(grid.firstChild);
+    while(div.firstChild)frag.appendChild(div.firstChild);
+    grid.appendChild(frag);
     domReady=true;
 }
-function render(){domReady=false;fullRender();}
 
 // ---- 时间段切换 ----
 function switchTF(tf){
@@ -1192,9 +1212,45 @@ function startCD(sec){cdSec=sec;clearInterval(cdTimer);const el=document.getElem
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
 
+// ---- 获取市场概览 ----
+async function loadMarketOverview(){
+    try{
+        const tickers=await okx('/market/tickers?instType=SPOT');
+        let totalVol=0, btcVol=0;
+        tickers.forEach(t=>{
+            const v=parseFloat(t.volCcy24h)||0;
+            totalVol+=v;
+            if(t.instId.startsWith('BTC-'))btcVol+=v;
+        });
+        // 用成交额估算市值占比
+        document.getElementById('vVol').textContent=FK(totalVol);
+        document.getElementById('vBtc').textContent=totalVol>0?(btcVol/totalVol*100).toFixed(1)+'%':'--';
+        // 从ticker里取BTC价格做参考
+        const btcTicker=tickers.find(t=>t.instId==='BTC-USDT');
+        if(btcTicker){
+            document.getElementById('vMcap').textContent=FU(parseFloat(btcTicker.last));
+        }
+    }catch(e){console.log('Market overview failed:',e);}
+}
+
 // ---- 启动 ----
 document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('grid').innerHTML=Array(8).fill('<div class="skel"></div>').join('');
+    // 获取市场情绪
+    okx('/market/tickers?instType=SPOT').then(tickers=>{
+        // 先用tickers数据填充头部
+        let totalVol=0, btcVol=0;
+        tickers.forEach(t=>{
+            const v=parseFloat(t.volCcy24h)||0;
+            totalVol+=v;
+            if(t.instId.startsWith('BTC-'))btcVol+=v;
+        });
+        document.getElementById('vVol').textContent=FK(totalVol);
+        document.getElementById('vBtc').textContent=totalVol>0?(btcVol/totalVol*100).toFixed(1)+'%':'--';
+        const btcTicker=tickers.find(t=>t.instId==='BTC-USDT');
+        if(btcTicker)document.getElementById('vMcap').textContent=FU(parseFloat(btcTicker.last));
+    }).catch(()=>{});
+    // 恐惧贪婪指数
     fetch('https://api.alternative.me/fng/?limit=1').then(r=>r.json()).then(d=>{
         if(d.data&&d.data[0]){const v=d.data[0].value,cls=d.data[0].value_classification;const el=document.getElementById('vFng');el.textContent=v+' '+cls;el.style.color=v<=25?'var(--r)':v<=45?'var(--y)':v<=55?'var(--txt)':'var(--g)';}
     }).catch(()=>{});

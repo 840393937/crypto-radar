@@ -144,4 +144,9 @@ canvas.kline{display:block;width:100%;cursor:crosshair;}
 ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--brd);border-radius:3px;}::-webkit-scrollbar-thumb:hover{background:var(--brd2);}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.card{animation:fadeUp .3s ease forwards;}
+.card{will-change:transform;}
+
+/* Proxy Config */
+.proxy-config{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+.proxy-config input:focus,.proxy-config select:focus{outline:none;border-color:var(--b);}
+.proxy-config button:hover{opacity:0.9;}
