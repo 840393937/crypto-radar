@@ -478,20 +478,26 @@ function strictFilter(signals,candlePats,chartPats,adxData,rsiNow,hNow,hPrev,e7n
 // ---- API ----
 const PROXIES=[
     u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
+    u=>'https://api.allorigins.win/get?url='+encodeURIComponent(u)+'&encoding=text',
     u=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u),
-    u=>u // direct fallback
+    u=>u
 ];
+let _pxIdx=0;
 async function okx(path){
     const target=OKX+path;
-    for(const px of PROXIES){
+    for(let i=0;i<PROXIES.length;i++){
+        const idx=(_pxIdx+i)%PROXIES.length;
         try{
-            const r=await fetch(px(target),{signal:AbortSignal.timeout(15000)});
+            const url=PROXIES[idx](target);
+            const r=await fetch(url,{signal:AbortSignal.timeout(25000)});
             if(!r.ok)continue;
-            const d=await r.json();
-            if(d.code==='0')return d.data;
+            let d=await r.json();
+            // allorigins/get 返回 {contents: "..."} 格式
+            if(d.contents)d=JSON.parse(d.contents);
+            if(d.code==='0'){_pxIdx=idx;return d.data;}
         }catch(e){continue;}
     }
-    throw new Error('所有API代理都失败');
+    throw new Error('API加载失败，请刷新重试');
 }
 
 function getCache(sym,bar){const k=sym+'_'+bar;const e=CACHE[k];if(e&&Date.now()-e.t<CACHE_TTL)return e.d;return null;}
