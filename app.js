@@ -478,7 +478,7 @@ function strictFilter(signals,candlePats,chartPats,adxData,rsiNow,hNow,hPrev,e7n
 
 // ---- API ----
 async function okx(path){
-    const url=PX+encodeURIComponent(OKX+path);
+    const url=OKX+path;
     const r=await fetch(url);
     if(!r.ok)throw new Error('API '+r.status);
     const d=await r.json();
