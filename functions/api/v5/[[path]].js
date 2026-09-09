@@ -1,8 +1,11 @@
 // 将 /api/v5/* 请求原样转发到 OKX 公共 API。
 // 前端以同源相对路径 /api/v5 调用，彻底消除跨域与 workers.dev 依赖。
 //
-// 注意：Pages Functions 必须导出 onRequest / onRequestGet 这类命名导出，
-// 而不是 Workers 的 export default { fetch() {} } —— 否则 0 条路由。
+// 两点踩坑记录（Pages Functions，非 Workers）：
+//   1. 必须导出 onRequest / onRequestGet 这类命名导出，
+//      写成 Workers 的 export default { fetch() {} } 会得到 0 条路由。
+//   2. 本项目的分发约定把 context 对象作为第一个参数传入，
+//      真正的 Request 在 ctx.request 上 —— 见 resolveRequest()。
 
 const OKX_BASE = 'https://www.okx.com';
 
@@ -12,7 +15,21 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-export async function onRequest(request) {
+// 兼容 (request, context) 与 (context) 两种调用约定
+function resolveRequest(first, second) {
+  if (first && typeof first === 'object' && 'request' in first) return first.request;
+  return first || (second && second.request) || null;
+}
+
+export async function onRequest(first, second) {
+  const request = resolveRequest(first, second);
+  if (!request) {
+    return new Response(
+      JSON.stringify({ code: '1', msg: 'proxy error: no request object' }),
+      { status: 500, headers: CORS }
+    );
+  }
+
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: CORS });
   }
