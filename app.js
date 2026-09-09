@@ -47,8 +47,8 @@ function sortData(){
     });
 }
 
-const OKX = 'https://www.okx.com/api/v5';
-const PX = 'https://api.allorigins.win/raw?url=';
+const OKX = 'https://crypto-api-proxy.840393937.workers.dev/api/v5';
+const PX = '';
 const CACHE = {};
 const CACHE_TTL = 30*60*1000;
 
