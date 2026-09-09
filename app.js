@@ -47,8 +47,8 @@ function sortData(){
     });
 }
 
-const OKX = 'https://crypto-api-proxy.840393937.workers.dev/api/v5';
-const PX = '';
+// 同源相对路径：由 Pages Function (functions/api/v5/[[path]].js) 代理转发到 OKX
+const OKX = '/api/v5';
 const CACHE = {};
 const CACHE_TTL = 30*60*1000;
 
