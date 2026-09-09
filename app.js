@@ -49,6 +49,11 @@ function sortData(){
 
 // 同源相对路径：由 Pages Function (functions/api/v5/[[path]].js) 代理转发到 OKX
 const OKX = '/api/v5';
+// 行情轮询间隔，硬性下限 10 秒。配合代理侧 15 秒边缘缓存，
+// 即使多端访问或频繁刷新，也不会因为轮询过密触发 OKX 429。
+const PRICE_POLL_MS = 10000;
+// 拉取失败后的自动重试延迟
+const RETRY_DELAY_MS = 10000;
 const CACHE = {};
 const CACHE_TTL = 30*60*1000;
 
@@ -477,13 +482,39 @@ function strictFilter(signals,candlePats,chartPats,adxData,rsiNow,hNow,hPrev,e7n
 }
 
 // ---- API ----
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
+// 全局限流闸门：一旦收到 429，接下来的请求先等它过去。
+// 这能防止并发批量请求（比如几十枚币的K线）把一次限流放大成持续风暴。
+let _rateLimitUntil=0;
+
+// 静默重试 + 指数退避：429 与网络波动都尽量在内部消化掉，
+// 最多尝试 3 次；全部失败才抛错，交由调用方的 catch 决定降级方式。
 async function okx(path){
     const url=OKX+path;
-    const r=await fetch(url);
-    if(!r.ok)throw new Error('API '+r.status);
-    const d=await r.json();
-    if(d.code!=='0')throw new Error('OKX: '+d.msg);
-    return d.data;
+    const wait=_rateLimitUntil-Date.now();
+    if(wait>0)await sleep(wait);
+
+    let lastErr=null;
+    for(let i=0;i<3;i++){
+        try{
+            const r=await fetch(url);
+            if(r.status===429){
+                lastErr=new Error('API 429 (rate limit)');
+                _rateLimitUntil=Date.now()+4000;
+                if(i<2){await sleep(1500*(2**i));continue;}
+                throw lastErr;
+            }
+            if(!r.ok)throw new Error('API '+r.status);
+            const d=await r.json();
+            if(d.code!=='0')throw new Error('OKX: '+d.msg);
+            return d.data;
+        }catch(e){
+            lastErr=e;
+            if(i<2)await sleep(800*(2**i));
+        }
+    }
+    throw lastErr;
 }
 
 function getCache(sym,bar){const k=sym+'_'+bar;const e=CACHE[k];if(e&&Date.now()-e.t<CACHE_TTL)return e.d;return null;}
@@ -491,7 +522,7 @@ function setCache(sym,bar,data){const k=sym+'_'+bar;CACHE[k]={d:data,t:Date.now(
 
 async function pfetch(items,fn,conc=8){const res=new Array(items.length);let idx=0;async function w(){while(idx<items.length){const i=idx++;try{res[i]=await fn(items[i],i);}catch{res[i]=null;}}}await Promise.all(Array.from({length:Math.min(conc,items.length)},()=>w()));return res;}
 
-// ---- 价格每秒刷新(不重渲染DOM) ----
+// ---- 价格定时刷新(10秒间隔，不重渲染DOM) ----
 async function refreshPrices(){
     try{
         const tickers=await okx('/market/tickers?instType=SPOT');
@@ -593,7 +624,15 @@ async function fetchCandles(){
 
     }catch(e){
         console.error('Fetch error:', e);
-        showProgress('失败: '+e.message,0);
+        if(allData.length){
+            // 已有数据：保留当前看板不闪红、不清空，等一会儿自动重试
+            showProgress('刷新失败，'+(RETRY_DELAY_MS/1000)+'秒后自动重试...',100);
+            setTimeout(hideProgress,2500);
+            setTimeout(()=>{domReady=false;fetchCandles();},RETRY_DELAY_MS);
+        }else{
+            // 首次加载失败：没有数据可留，明确提示并交由用户手动重试
+            showProgress('加载失败: '+e.message+'（检查网络后点击刷新）',0);
+        }
     }
     finally{btn.disabled=false;btn.textContent='刷新';}
 }
@@ -1197,14 +1236,14 @@ function doRefresh(){
     document.getElementById('vCountdown').textContent='';
     Object.keys(CACHE).forEach(k=>delete CACHE[k]);klineData={};domReady=false;
     fetchCandles().then(()=>{
-        priceTimer=setInterval(refreshPrices,2000);
+        priceTimer=setInterval(refreshPrices,PRICE_POLL_MS);
         candleTimer=setInterval(()=>{domReady=false;fetchCandles();},300000);
         startCD(300);
     });
 }
 function setAutoInterval(sec){
     clearInterval(priceTimer);clearInterval(candleTimer);clearInterval(cdTimer);
-    priceTimer=setInterval(refreshPrices,2000);
+    priceTimer=setInterval(refreshPrices,PRICE_POLL_MS);
     candleTimer=setInterval(()=>{domReady=false;fetchCandles();},parseInt(sec)*1000);
     startCD(parseInt(sec));
 }
@@ -1255,7 +1294,7 @@ document.addEventListener('DOMContentLoaded',()=>{
         if(d.data&&d.data[0]){const v=d.data[0].value,cls=d.data[0].value_classification;const el=document.getElementById('vFng');el.textContent=v+' '+cls;el.style.color=v<=25?'var(--r)':v<=45?'var(--y)':v<=55?'var(--txt)':'var(--g)';}
     }).catch(()=>{});
     fetchCandles().then(()=>{
-        priceTimer=setInterval(refreshPrices,2000);
+        priceTimer=setInterval(refreshPrices,PRICE_POLL_MS);
         candleTimer=setInterval(()=>{domReady=false;fetchCandles();},300000);
         startCD(300);
     });

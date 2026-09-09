@@ -51,17 +51,26 @@ export async function onRequest(first, second) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
       cf: {
-        cacheTtl: 15, // 缓存15秒，解决限流和延迟
+        // 成功响应缓存15秒：多端访问/频繁刷新只会命中边缘一次，是防 429 的主力。
+        // 刻意取 15 而非 10：对 429 的保护是单调递增的，15 秒比 10 秒更能摊平请求量。
+        cacheTtl: 15,
         cacheEverything: true,
       },
     });
     const data = await res.text();
+
+    // 关键：失败响应（含 429、5xx）绝不能被缓存。
+    // 否则一次限流会被缓存 15 秒并共享给所有用户，形成"集体限流"。
+    // 用响应头 no-store 覆盖上面的 cf 指令，Cloudflare 以响应头为准。
+    const cacheable = res.status >= 200 && res.status < 300;
+    const retryAfter = res.headers.get('Retry-After');
     return new Response(data, {
       status: res.status,
       headers: {
         ...CORS,
         'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'public, max-age=15',
+        'Cache-Control': cacheable ? 'public, max-age=15' : 'no-store',
+        ...(cacheable ? {} : retryAfter ? { 'Retry-After': retryAfter } : {}),
       },
     });
   } catch (err) {
