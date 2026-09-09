@@ -1231,14 +1231,18 @@ function showProgress(t,p){const w=document.getElementById('progressWrap');w.cla
 function hideProgress(){document.getElementById('progressWrap').classList.add('hidden');}
 function filterBy(f){curFilter=f;document.querySelectorAll('.pill').forEach(b=>b.classList.toggle('active',b.dataset.f===f));render();}
 function doSearch(q){searchQuery=q.trim().toUpperCase();render();}
+// 读取下拉框当前选择的自动刷新间隔（毫秒），
+// 保证倒计时显示与真实刷新行为一致
+function selIntervalMs(){return parseInt(document.getElementById('selInterval').value)*1000;}
+
 function doRefresh(){
     clearInterval(priceTimer);clearInterval(candleTimer);clearInterval(cdTimer);
     document.getElementById('vCountdown').textContent='';
     Object.keys(CACHE).forEach(k=>delete CACHE[k]);klineData={};domReady=false;
     fetchCandles().then(()=>{
         priceTimer=setInterval(refreshPrices,PRICE_POLL_MS);
-        candleTimer=setInterval(()=>{domReady=false;fetchCandles();},300000);
-        startCD(300);
+        candleTimer=setInterval(()=>{domReady=false;fetchCandles();},selIntervalMs());
+        startCD(selIntervalMs()/1000);
     });
 }
 function setAutoInterval(sec){
@@ -1295,7 +1299,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     }).catch(()=>{});
     fetchCandles().then(()=>{
         priceTimer=setInterval(refreshPrices,PRICE_POLL_MS);
-        candleTimer=setInterval(()=>{domReady=false;fetchCandles();},300000);
-        startCD(300);
+        candleTimer=setInterval(()=>{domReady=false;fetchCandles();},selIntervalMs());
+        startCD(selIntervalMs()/1000);
     });
 });
