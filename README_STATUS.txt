@@ -5,7 +5,7 @@ crypto-radar — 项目状态与阻塞点记录
 ================================================================================
 
 【0. 当前仓库状态】
-  HEAD              61a3024  (docs: add README_STATUS.txt with migration state and deploy blocker)
+  HEAD              580fb4a  (docs: mark Cloudflare Pages deploy complete in README_STATUS.txt)
   分支              master，与 origin/master 完全同步 (0 ahead / 0 behind)
   功能代码基线      8ca5b7e  (fix: align candle auto-refresh interval with the dropdown value)
   工作副本（唯一）  D:\ClaudeProjects\crypto-radar
@@ -48,18 +48,22 @@ crypto-radar — 项目状态与阻塞点记录
       两者都已同步写入并验证。settings.json 那段是声明式记录，便于迁移/复查。
 
   Codex  (C:\Users\84039\.codex\)
-    config.toml  →  model_provider=sensenova, model=sensenova-6.8-flash-lite
+    config.toml  →  model_provider=sensenova, model=deepseek-v4-pro
+                    (2026-09-12 23:10 实测：deepseek-v4-pro 1M ctx / "Reply OK" 1.9s；
+                     sensenova-6.8-flash-lite 256K ctx 多模态 / 4.7s。
+                     备选: deepseek-v4-flash · sensenova-6.7-flash-lite · glm-5.2 ·
+                           sensenova-u1-fast · sensenova-u1.5-lite · kimi-k3)
     两个 provider (sensenova / custom) 均指向 http://127.0.0.1:15722/v1
     .env         →  SENSENOVA_API_KEY
     启动代理     →  双击 C:\Users\84039\.codex\start-sensenova.bat  (pythonw 最小化)
     健康检查     →  curl http://127.0.0.1:15722/v1/models
-    日志         →  C:\Users\84039\.codex\sensenova-proxy.log
+    日志         →  C:\Users\84039\.codex\sensenova-proxy.log  (已改为真落盘)
 
     ⚠ 必须经本地翻译代理 15722，不能直连 SenseNova：
       codex-cli 0.152.0 硬拒绝 wire_api="chat"（启动即报错），
       而 SenseNova 官方端点没有 Responses 接口 (/v1/responses → 404)。
       拓扑: codex ──Responses──> 127.0.0.1:15722 ──Chat──> token.sensenova.cn/v1
-      翻译代理里有两个必守的修正，改脚本时不要退回：
+      翻译代理里有四个必守的修正，改脚本时不要退回：
         (a) role="developer" 必须映射成 "system"
             —— SenseNova 的 /v1/chat/completions 只认 system|user|assistant|tool，
                收到 developer 直接 400 inference request is invalid。
@@ -67,7 +71,23 @@ crypto-radar — 项目状态与阻塞点记录
         (b) 流式必须先发 response.output_item.added 再发该条 output_text.delta，
             否则 codex 报 "OutputTextDelta without active item"；
             tool_call 的 output_index 要用它在整个 output 里的真实位置。
-      单元测试 12/12: C:\Users\84039\AppData\Local\Temp\test-proxy.py （离线可跑）
+        (c) 流式 tool_call 必须按 index 合并：SenseNova 把同一个 tool_call 拆成
+            很多 chunk，只有第一个带 id/function.name，后面只有 index + arguments
+            碎片。按 chunk 各建一个 item 会产生 23 个 name="" 的假 function_call，
+            SenseNova 回 "invalid tool_call function, function/name cannot be empty"
+            → codex 502 Bad Gateway → EXIT=1，工具永远无法执行。
+            （此前端到端验证都用不带工具的「回复 OK」提示，所以一直没暴露。）
+        (d) 用 ThreadingHTTPServer + UPSTREAM_TIMEOUT(默认120)，不是 HTTPServer +
+            timeout=600。单线程时一个上游卡住会让整个端口静默失联最长 10 分钟，
+            且 netstat 仍显示 LISTENING、进程仍活着，极易误判。
+            log() 必须同时写文件：pythonw 丢弃 stdout，只 print 时每次卡死零痕迹。
+      单元测试: test-proxy.py (基础 12/12) + test_toolcall.py (tool_call 合并)
+                均在 %LOCALAPPDATA%\Temp\，离线可跑
+
+  端到端验证 (2026-09-12 23:28, D:\ClaudeProjects\crypto-radar)
+    codex.exe exec --skip-git-repo-check "用 shell 工具列出顶层文件，一行中文回答"
+    → exec_command 成功执行 (390ms)，EXIT=0，11 个顶层文件识别正确
+    → 代理日志: POST /v1/responses 200；期间一次 429 限流被自动 retry 1/5 后成功
 
   cc-switch
     provider sensenova, app_type=codex, is_current=1, meta.apiFormat="openai_responses"
@@ -121,5 +141,6 @@ crypto-radar — 项目状态与阻塞点记录
   - codex 下 C:\Users\84039\.agents\skills\everything-openai-codex\docs\* 缺失 YAML
     frontmatter，加载失败
   - 738 个额外 skill 因超出 skills context budget 被丢弃
-  - Model metadata for 'sensenova-6.8-flash-lite' not found, using fallback metadata
+  - Model metadata for 'deepseek-v4-pro' not found, using fallback metadata
+    （第三方模型没有 codex 内置元数据，走 fallback，功能不受影响）
 ================================================================================
