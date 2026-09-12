@@ -5,14 +5,16 @@ crypto-radar — 项目状态与阻塞点记录
 ================================================================================
 
 【0. 当前仓库状态】
-  HEAD              8ca5b7e  (fix: align candle auto-refresh interval with the dropdown value)
+  HEAD              61a3024  (docs: add README_STATUS.txt with migration state and deploy blocker)
   分支              master，与 origin/master 完全同步 (0 ahead / 0 behind)
+  功能代码基线      8ca5b7e  (fix: align candle auto-refresh interval with the dropdown value)
   工作副本（唯一）  D:\ClaudeProjects\crypto-radar
   远程              https://github.com/840393937/crypto-radar.git
   技术栈            Python HTTP 服务 (server.py) + cloudflared 隧道 + 静态 HTML/CSS/JS
                     + Cloudflare Pages (functions/ + .wrangler/ + start-online.bat)
   本地启动          双击 start.bat  →  http://localhost:8080  +  临时 *.trycloudflare.com 链接
-  在线部署          见下方【3. 阻塞点】—— 尚未完成
+  在线部署          已完成 ✅  https://4a5589fd.crypto-dashboard-b0m-1ad.pages.dev
+                    （项目 crypto-dashboard-b0m，每次 deploy 地址会变；详见【3】）
 
 --------------------------------------------------------------------------------
 【1. D 盘迁移 —— 已完成并验证】
@@ -76,33 +78,42 @@ crypto-radar — 项目状态与阻塞点记录
     15723  = 旧的 mimo 端点（pythonw），不要动
 
 --------------------------------------------------------------------------------
-【3. 生产部署 —— 未完成，阻塞在 Cloudflare 凭证】
+【3. 生产部署 —— 已完成并验证 ✅】
 --------------------------------------------------------------------------------
-  目标命令（在 D 盘项目根目录执行）：
-    npx wrangler pages deploy . --project-name=crypto-dashboard-b0m
+  线上地址:  https://4a5589fd.crypto-dashboard-b0m-1ad.pages.dev
+             项目 crypto-dashboard-b0m，部署 ID 4a5589fd（每次 deploy 地址会变）
 
-  失败结果（2026-09-11）：
-    ✘ [ERROR] A request to the Cloudflare API
-      (/accounts/85e8d09dd4eea2adad6952c6cf9a9ffd/pages/projects/crypto-dashboard-b0m) failed.
-      Authentication failed (status: 400) [code: 9106]
+  部署命令（在 D 盘项目根目录执行，走本机 65532 代理）：
+    CLOUDFLARE_API_TOKEN=<token> npx wrangler pages deploy . \
+        --project-name=crypto-dashboard-b0m
+  凭证是 Cloudflare User API Token（cfut_ 前缀，Pages:Edit 权限，账号 85e8d09d…），
+  用环境变量一次性传入，未写入任何持久化文件；凭证落点为
+  %APPDATA%\xdg.config\.wrangler\ （Windows，注意不是 ~/.wrangler）。
 
-  根因：这台机器上**没有任何 Cloudflare 凭证**——
-    - 环境变量无 CLOUDFLARE_API_TOKEN
-    - 无 ~/.wrangler、无 %LOCALAPPDATA%\.wrangler、无 wrangler configstore 状态
-    - git credential manager 中亦无
-  这是真实阻塞，无法自行修复，需要人工完成一次授权。
+  结果（wrangler 4.98.0 / node v24.16.0）：
+    ✨ Compiled Worker successfully / Uploaded (12/12) / Uploading Functions bundle
+    ✨ Deployment complete!  exit code 0
+    产物 0.13 MB（Cloudflare Pages 限额 25 MB）
 
-  解锁方式（二选一，然后重跑上面的部署命令）：
-    (1) set CLOUDFLARE_API_TOKEN=<具备 Pages:Edit 权限的 token>     ← 需覆盖账号 85e8d09d…
-    (2) npx wrangler login                                          ← 浏览器交互式授权，一次性
-        （wrangler 4.98.0 在非交互 stdin 下会挂起等 OAuth，必须人工在终端里跑）
+  线上验证（经 http://127.0.0.1:65532 代理请求，2026-09-12）：
+    GET /                                              HTTP 200   3,687 B  (0.86 s)
+    GET /style.css                                     HTTP 200  10,280 B
+    GET /app.js                                        HTTP 200  68,761 B
+    GET /api/v5/market/ticker?instId=BTC-USDT          HTTP 200
+        → {"code":"0","data":[{"instId":"BTC-USDT","last":"77461.4",
+           "open24h":"78719","high24h":"78877.3","low24h":"76880.1"}]}
+      首次请求返回 HTTP 429 {"code":"50011"}，等 6 秒重试即 200 —— 这是 OKX 公共端点
+      限流，不是部署问题（Pages Function 未部署时会返回 404，不会 429）。
+    以上证明：静态资源齐备且字节数与本地一致，Pages Function 已挂载并成功代理 OKX 真实行情。
 
-  其余前置条件均已验证可用，token 到位后即可成功：
-    - 代理端口 65532 (HTTPS_PROXY=http://127.0.0.1:65532) 2026-09-12 起已监听且转发正常
-      （经它请求 api.cloudflare.com 可正常返回 400）；2026-09-11 时该端口尚为死端口
-    - 待部署产物合法：index.html (3,687 B) + functions/api/v5/[[path]].js，共 0.13 MB
-      （Cloudflare Pages 限额 25 MB）
-    - node v24.16.0 / wrangler 4.98.0
+  历史阻塞记录（2026-09-11，已解决）：
+    当时机器上没有任何 Cloudflare 凭证（无 CLOUDFLARE_API_TOKEN、无 ~/.wrangler、
+    无 %LOCALAPPDATA%\.wrangler、git credential manager 亦无），部署报
+    Authentication failed (status: 400) [code: 9106]。由人工提供 API Token 后解决。
+    另记 wrangler login 的坑：默认只绑 [::1]:8976（IPv6-only）而 redirect_uri 写死
+    http://localhost:8976/oauth/callback，需 NODE_OPTIONS=--dns-result-order=ipv4first
+    让 localhost 解析到 127.0.0.1；且该命令无 --timeout 参数，默认 300 s 超时。
+    登录中途若用 curl 探测 /oauth/callback（不带 code），会让 wrangler 立即判失败退出。
 
 --------------------------------------------------------------------------------
 【4. 已知无害告警（非本次改动引入）】
